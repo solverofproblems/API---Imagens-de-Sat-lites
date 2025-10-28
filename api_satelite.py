@@ -1,8 +1,17 @@
+import os
 import boto3
 from botocore import UNSIGNED
 from botocore.client import Config
+import xarray as xr
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
-# Conexão anônima com bucket público GOES-16
+# Pasta onde salvar os arquivos
+local_path = "C:\\Users\\Eduardo\\Desktop\\Imagens de satélites"
+arquivo_local = os.path.join(local_path, "arquivo_goes.nc")
+
+# Conexão anônima
 s3 = boto3.client(
     's3',
     region_name='us-east-1',
@@ -10,18 +19,39 @@ s3 = boto3.client(
 )
 
 bucket = 'noaa-goes16'
-prefix = 'ABI-L2-CMIPF/2025/300/2130/'  # substitua com a data/hora que quiser
+prefix = "ABI-L2-CMIPF/2017/191/00/"
 
-# Listar arquivos disponíveis no prefix
-response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=10)
 
 if 'Contents' in response:
-    for obj in response['Contents']:
-        print(obj['Key'])
+    primeiro_arquivo = response['Contents'][0]['Key']
+    print("Arquivo selecionado:", primeiro_arquivo)
 
-    # Baixar o primeiro arquivo listado
-    first_file = response['Contents'][0]['Key']
-    s3.download_file(bucket, first_file, 'goes_file.nc')
-    print("Arquivo baixado com sucesso:", first_file)
+    # Baixar arquivo
+    s3.download_file(bucket, primeiro_arquivo, arquivo_local)
+    print("Arquivo baixado com sucesso em:", arquivo_local)
+
+    # Abrir com xarray
+    variaveis_img = xr.open_dataset(arquivo_local)
+    print(variaveis_img)
+
+    dados = variaveis_img['CMI']
+    lat = variaveis_img['lat']
+    lon = variaveis_img['lon']
+
+    mask = (lat >= -34) & (lat <= 5) & (lon >= -74) & (lon <= -34)
+    dados_brasil = dados.where(mask, drop=True)
+    lat_brasil = lat.where(mask, drop=True)
+    lon_brasil = lon.where(mask, drop=True)
+
+    plt.figure(figsize=(10, 10))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    im = ax.pcolormesh(lon_brasil, lat_brasil, dados_brasil, cmap='gray')
+    ax.add_feature(cfeature.BORDERS, edgecolor='red')
+    ax.add_feature(cfeature.COASTLINE)
+    ax.set_title('GOES-16 CMI - Brasil')
+    plt.colorbar(im, label='Reflectância')
+    plt.show()
+
 else:
-    print("Nenhum arquivo encontrado nesse prefixo.")
+    print("Nenhum arquivo encontrado para esse prefixo.")
